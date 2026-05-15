@@ -5,6 +5,7 @@ The following devices have been tested and are fully working:
 - keepLINK KP-9000-6XHML-X2, same as above, but Managed
 - keepLINK kp-9000-6hx-x (RTL8372 + RTL8221B 2.5GBit PHY: 5 x 2.5GBit + 1x 10GBit SFP+)
 - keepLINK kp-9000-9xh-x-eu (1 x RTL8373 + RTL8224: 8x 2.5GBit + 1x 10GBit SFP+)
+- keepLINK KP-9000-9XHPML-X-EU (RTL8373 + RTL8224, 8x 2.5GBit 802.3at PoE+ + 1x 10G SFP+, managed; PoE handled by separate MCU on daughter board — *initial support, untested*)
 - Lianguo LG-SWTGW218AS (RTL8373 + RTL8224 PHY: 8x 2.5GBit + 1x 10GBit SFP+)
 - No-Name ZX-SWTGW215AS, managed version of kp-9000-6hx-x, ordered on
   AliExpress as keepLINK 5+1 port managed
