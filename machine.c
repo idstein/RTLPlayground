@@ -155,27 +155,42 @@ void machine_custom_init(void) { }
 
 #elif defined MACHINE_KP_9000_9XHPML_X_EU
 /*
- * keepLink KP-9000-9XHPML-X-EU (rebranded as Sailing-L SL-SWTGW0108P):
+ * keepLink KP-9000-9XHPML-X-EU (== -AC, only the bundled mains plug differs):
  *   - RTL8373 SoC + RTL8224/8226B PHY: 8x 2.5GbE + 1x 10G SFP+, managed L2
  *   - 802.3bt PoE+/PoE++ (HiPoE class 5..7) via separate HiSilicon (haisi_pse)
  *     controller on the "Itender" daughter board, talking over I2C; out of
  *     scope for switch-side firmware.
+ *   - Hardware revision V1.1 (factory-config sector self-identification,
+ *     OEM firmware KP-9000-9XHPML-X-AC_V100.9.5.bin).
  *
- * OEM firmware reverse-engineering confirms the following are correct for
- * this hardware (see doc/kp_9000_9xhpml_x_eu_re.md):
+ * OEM firmware reverse-engineering confirms the following fields are correct
+ * for this hardware (see doc/kp_9000_9xhpml_x_eu_re.md for the full report):
  *
  *   - SFP module-detect on GPIO 30  (OEM string: "gpio30(OE Exist)=%bu")
  *   - SFP RX_LOS         on GPIO 37  (OEM string: "gpio37(OE LOS)=%bu")
  *   - Reset / button     on GPIO 54  (OEM strings: "gpio54=%bu" and
  *                                     "Reset button push %bu second")
- *   - SFP serdes lane    = 1         (matches the V2.2 sibling layout)
- *   - I2C bus for SFP    = SDA on GPIO39_I2C_SDA4, SCL on GPIO40_I2C_SCL3_MDC1
+ *   - SFP I2C bus        = SDA on GPIO39_I2C_SDA4, SCL on GPIO40_I2C_SCL3_MDC1
+ *                          (matches OEM "i2cdata reg11/reg12" trace)
  *
- * The OEM firmware does NOT program any of the LED-set/LED-mux/LED-port-sel
- * registers (0x6520..0x65F4) — it relies on chip strapping/OTP defaults.
- * The LED block below is therefore inherited from KP-9000-9XHML-X V2.2 as a
- * known-good starting point and may need tweaking after runtime inspection
- * via leds_dump() (rtl837x_leds.c:28) on the bench.
+ * Still unverified statically (the OEM firmware does not write the relevant
+ * registers, so values are not recoverable from the binary):
+ *
+ *   - sfp_port[0].sds — serdes lane for the SFP port (default 1 per the
+ *     9-port RTL8373 family convention).
+ *   - port_led_set[], led_sets[][], high_leds, led_mux[] — the OEM firmware
+ *     does NOT program any LED config register (0x6520..0x65F4); the chip
+ *     uses strapping/OTP defaults. The LED block below is inherited from
+ *     KP-9000-9XHML-X V2.2 as a known-good starting point; final values
+ *     should come from a runtime leds_dump() (rtl837x_leds.c:28) on the
+ *     bench.
+ *
+ * Note: HW V1.1 places the PIN_MUX/HW_CONF byte block at 0x7F74..0x7F80 /
+ * 0x7E01..0x7E07, which is -0x18 from the V1.0 layout defined as
+ * RTL837X_PIN_MUX_0/1/2 in rtl837x_regs.h. RTLPlayground typically does not
+ * re-program PIN_MUX (it inherits the chip-default + boot-ROM values), so
+ * this delta is observational only; if a future feature does need to
+ * rewrite PIN_MUX on this board, the V1.1 base addresses are what apply.
  */
 __code const struct machine machine = {
 	.machine_name = "keepLink KP-9000-9XHPML-X-EU",
