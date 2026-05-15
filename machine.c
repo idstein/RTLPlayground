@@ -176,17 +176,17 @@ void machine_custom_init(void) { }
  *   - SFP I2C bus        = SDA on GPIO39_I2C_SDA4, SCL on GPIO40_I2C_SCL3_MDC1
  *                          (matches OEM "i2cdata reg11/reg12" trace)
  *
- * Still unverified statically (the OEM firmware does not write the relevant
- * registers, so values are not recoverable from the binary):
- *
- *   - sfp_port[0].sds — serdes lane for the SFP port (default 1 per the
- *     9-port RTL8373 family convention).
- *   - port_led_set[], led_sets[][], high_leds, led_mux[] — the OEM firmware
- *     does NOT program any LED config register (0x6520..0x65F4); the chip
- *     uses strapping/OTP defaults. The LED block below is inherited from
- *     KP-9000-9XHML-X V2.2 as a known-good starting point; final values
- *     should come from a runtime leds_dump() (rtl837x_leds.c:28) on the
- *     bench.
+ * LED matrix below was captured at runtime via leds_dump() BEFORE leds_setup()
+ * on a real HW V1.1 unit: the chip's strapping pins / OTP set up a 3-LED-per-
+ * port wiring on the eight RJ45 jacks (LED-IDs 0/1/2 of each port routed to
+ * pads 0..23) and a 4-LED wiring on the SFP port (LED-IDs 0..3 routed to
+ * pads 24..27). All ports use SET 0, where:
+ *     LED-ID 0 = 10M Link+Activity
+ *     LED-ID 1 = 1G / 100M Link+Activity
+ *     LED-ID 2 = Full-Duplex indicator
+ *     LED-ID 3 = 2.5G Link+Activity (only physically wired on the SFP slot)
+ * SETs 1..3 mirror the chip's boot defaults so that any port reassigned to
+ * a different SET via the web UI doesn't go dark.
  *
  * Note: HW V1.1 places the PIN_MUX/HW_CONF byte block at 0x7F74..0x7F80 /
  * 0x7E01..0x7E07, which is -0x18 from the V1.0 layout defined as
@@ -210,38 +210,53 @@ __code const struct machine machine = {
 	.sfp_port[0].sds = 1,
 	.sfp_port[0].i2c = { .sda = GPIO39_I2C_SDA4, .scl = GPIO40_I2C_SCL3_MDC1 },
 	.reset_pin = GPIO54_ACL_BIT2_EN,
-	.high_leds = { .mux = LED_27 | LED_29, .enable = LED_28_SYS | LED_29 },
-	.port_led_set = { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+	/* PIN_MUX_0 chip-default = 0x30000000 (bits 28+29 set) -> LED_28_SYS | LED_29
+	 * LED_GLB_IO_EN chip-default = 0x5FFFFFFF (bits 27+28 set, bit 29 clear)
+	 *                                                         -> LED_27 | LED_28_SYS */
+	.high_leds = { .mux = LED_28_SYS | LED_29, .enable = LED_27 | LED_28_SYS },
+	/* LED_PORT_SET_SEL chip-default = 0x00000000  ->  all 9 ports use SET 0 */
+	.port_led_set = { 0, 0, 0, 0, 0, 0, 0, 0, 0 },
 	.led_sets = {
-		{   /* Set 0 for RJ45 connectors */
-			/* LED0: Right Green */
-			LEDS_2G5 | LEDS_1G | LEDS_100M | LEDS_10M | LEDS_LINK | LEDS_ACT,
-			/* LED1: Left Orange */
-			LEDS_2G5 | LEDS_LINK,
-			/* LED2: Left Green */
-			LEDS_1G | LEDS_LINK,
-			/* LED3: None */
-			0,
-		}, { /* Set 1 for SFP port */
-			/* LED0: Single Green "9" LED */
-			LEDS_2G5 | LEDS_TWO_PAIR_1G | LEDS_1G | LEDS_500M | LEDS_100M | LEDS_10M | LEDS_LINK | LEDS_ACT | LEDS_10G | LEDS_TWO_PAIR_5G | LEDS_5G | LEDS_TWO_PAIR_2G5,
-			/* LED1: D23 LED on PCB */
-			LEDS_1G | LEDS_LINK,
-			/* LED2: D22 LED on PCB */
-			LEDS_2G5 | LEDS_LINK,
-			/* LED3: Unused */
-			LEDS_COL | LEDS_DUPLEX,
-		}, { /* Set 2: Unused, mirrored from stock */
-			LEDS_100M | LEDS_10M | LEDS_LINK | LEDS_ACT,
-			LEDS_1G | LEDS_LINK | LEDS_ACT,
-			LEDS_2G5 | LEDS_LINK | LEDS_ACT | LEDS_5G,
-			LEDS_10G | LEDS_ACT | LEDS_LINK,
-		}, { /* Set 3: Unused, mirrored from stock */
-			LEDS_TX,
-			LEDS_RX,
-			LEDS_2G5 | LEDS_TWO_PAIR_1G | LEDS_1G | LEDS_500M | LEDS_100M | LEDS_10M | LEDS_ACT | LEDS_10G | LEDS_TWO_PAIR_5G | LEDS_5G | LEDS_TWO_PAIR_2G5,
-			LEDS_2G5 | LEDS_TWO_PAIR_1G | LEDS_1G | LEDS_500M | LEDS_100M | LEDS_10M | LEDS_LINK | LEDS_10G | LEDS_TWO_PAIR_5G | LEDS_5G | LEDS_TWO_PAIR_2G5,
+		{   /* SET 0 — used by all 9 ports (KP-9000-9XHPML-X HW V1.1 chip default) */
+			/* LED-ID 0: 10M LINK ACT     (chip default 0x000160) */
+			LEDS_10M | LEDS_LINK | LEDS_ACT,
+			/* LED-ID 1: 1G + 100M LINK ACT  (0x000154) */
+			LEDS_1G | LEDS_100M | LEDS_LINK | LEDS_ACT,
+			/* LED-ID 2: full-duplex  (0x001000) */
+			LEDS_DUPLEX,
+			/* LED-ID 3: 2.5G LINK ACT  (0x000141) — wired only on SFP pads 24..27 */
+			LEDS_2G5 | LEDS_LINK | LEDS_ACT,
+		}, { /* SET 1 — chip default, unused unless a port is reassigned */
+			LEDS_100M | LEDS_10M | LEDS_LINK,            /* 0x000070 */
+			LEDS_1G | LEDS_LINK,                          /* 0x000044 */
+			LEDS_2G5 | LEDS_LINK,                         /* 0x000041 */
+			LEDS_COL | LEDS_DUPLEX,                       /* 0x001800 */
+		}, { /* SET 2 — chip default (high-speed flavours: 5G/10G) */
+			LEDS_100M | LEDS_10M | LEDS_LINK | LEDS_ACT,         /* 0x000170 */
+			LEDS_1G | LEDS_LINK | LEDS_ACT,                       /* 0x000144 */
+			LEDS_2G5 | LEDS_LINK | LEDS_ACT | LEDS_5G,            /* 0x040141 */
+			LEDS_10G | LEDS_LINK | LEDS_ACT,                      /* 0x010140 */
+		}, { /* SET 3 — chip default (RX/TX activity + omnibus link/act) */
+			LEDS_TX,                                              /* 0x000400 */
+			LEDS_RX,                                              /* 0x000200 */
+			LEDS_2G5 | LEDS_TWO_PAIR_1G | LEDS_1G | LEDS_500M | LEDS_100M
+			    | LEDS_10M | LEDS_ACT | LEDS_10G | LEDS_TWO_PAIR_5G
+			    | LEDS_5G | LEDS_TWO_PAIR_2G5,                    /* 0x0F013F */
+			LEDS_2G5 | LEDS_TWO_PAIR_1G | LEDS_1G | LEDS_500M | LEDS_100M
+			    | LEDS_10M | LEDS_LINK | LEDS_10G | LEDS_TWO_PAIR_5G
+			    | LEDS_5G | LEDS_TWO_PAIR_2G5,                    /* 0x0F007F */
 		},
+	},
+	/* LED pad MUX: 3 LEDs per RJ45 port (LED-IDs 0/1/2 wired, 4th slot skipped)
+	 * + 4 LEDs on the SFP port. Matches the BEFORE leds_dump output:
+	 *   00 01 02  04 05 06  08 09 0a  0c 0d 0e  10 11 12
+	 *   14 15 16  18 19 1a  1c 1d 1e  20 21 22 23                            */
+	.led_mux_custom = 1,
+	.led_mux = {
+		0x00, 0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09,
+		0x0a, 0x0c, 0x0d, 0x0e, 0x10, 0x11, 0x12, 0x14,
+		0x15, 0x16, 0x18, 0x19, 0x1a, 0x1c, 0x1d, 0x1e,
+		0x20, 0x21, 0x22, 0x23,
 	},
 };
 
