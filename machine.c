@@ -155,11 +155,27 @@ void machine_custom_init(void) { }
 
 #elif defined MACHINE_KP_9000_9XHPML_X_EU
 /*
- * keepLink KP-9000-9XHPML-X-EU: 8x 2.5GbE 802.3at PoE+ + 1x 10G SFP+, managed.
- * Same RTL8373 + RTL8224 main path as KP-9000-9XHML-X V2.2; PoE is driven by a
- * separate MCU on the "Itender" daughter board, so it does not need switch-side
- * firmware support. Pin assignments are inherited from V2.2 as a starting point
- * and should be confirmed over the serial console on first boot.
+ * keepLink KP-9000-9XHPML-X-EU (rebranded as Sailing-L SL-SWTGW0108P):
+ *   - RTL8373 SoC + RTL8224/8226B PHY: 8x 2.5GbE + 1x 10G SFP+, managed L2
+ *   - 802.3bt PoE+/PoE++ (HiPoE class 5..7) via separate HiSilicon (haisi_pse)
+ *     controller on the "Itender" daughter board, talking over I2C; out of
+ *     scope for switch-side firmware.
+ *
+ * OEM firmware reverse-engineering confirms the following are correct for
+ * this hardware (see doc/kp_9000_9xhpml_x_eu_re.md):
+ *
+ *   - SFP module-detect on GPIO 30  (OEM string: "gpio30(OE Exist)=%bu")
+ *   - SFP RX_LOS         on GPIO 37  (OEM string: "gpio37(OE LOS)=%bu")
+ *   - Reset / button     on GPIO 54  (OEM strings: "gpio54=%bu" and
+ *                                     "Reset button push %bu second")
+ *   - SFP serdes lane    = 1         (matches the V2.2 sibling layout)
+ *   - I2C bus for SFP    = SDA on GPIO39_I2C_SDA4, SCL on GPIO40_I2C_SCL3_MDC1
+ *
+ * The OEM firmware does NOT program any of the LED-set/LED-mux/LED-port-sel
+ * registers (0x6520..0x65F4) — it relies on chip strapping/OTP defaults.
+ * The LED block below is therefore inherited from KP-9000-9XHML-X V2.2 as a
+ * known-good starting point and may need tweaking after runtime inspection
+ * via leds_dump() (rtl837x_leds.c:28) on the bench.
  */
 __code const struct machine machine = {
 	.machine_name = "keepLink KP-9000-9XHPML-X-EU",

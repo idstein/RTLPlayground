@@ -7,3 +7,5 @@ version.h
 tools/httpd_sim
 tools/injector
 tools/fileadder
+ghidra_proj/
+tools/ghidra/__pycache__/
