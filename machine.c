@@ -157,9 +157,12 @@ void machine_custom_init(void) { }
 /*
  * keepLink KP-9000-9XHPML-X-EU (== -AC, only the bundled mains plug differs):
  *   - RTL8373 SoC + RTL8224/8226B PHY: 8x 2.5GbE + 1x 10G SFP+, managed L2
- *   - 802.3bt PoE+/PoE++ (HiPoE class 5..7) via separate HiSilicon (haisi_pse)
- *     controller on the "Itender" daughter board, talking over I2C; out of
- *     scope for switch-side firmware.
+ *   - 802.3bt PoE+/PoE++ (HiPoE class 5..7) via a Realtek RTL8238B PSE
+ *     controller on a separate PoE daughter board, talking over I2C at
+ *     slave addresses 0x20 / 0x21. Firmware probes it ("PSE IC Type:
+ *     RTL8238b" @ file 0xE07B6 in OEM V100.9.5). PoE management is out of
+ *     scope for switch-side firmware; if RTLPlayground wants to drive it,
+ *     it needs the RTL8238B image-load + per-port control protocol.
  *   - Hardware revision V1.1 (factory-config sector self-identification,
  *     OEM firmware KP-9000-9XHPML-X-AC_V100.9.5.bin).
  *

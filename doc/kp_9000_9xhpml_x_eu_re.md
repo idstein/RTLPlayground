@@ -2,8 +2,12 @@
 
 This is the consolidated reverse-engineering output for the OEM firmware
 of the keepLink KP-9000-9XHPML-X — managed 8× 2.5 GbE 802.3bt PoE+ +
-1× 10 G SFP+, RTL8373 SoC, RTL8224/8226B PHY, HiSilicon (HiSi /
-`haisi`) PSE controller on a separate "Itender" daughter board.
+1× 10 G SFP+, RTL8373 SoC, RTL8224/8226B PHY, Realtek **RTL8238B** PSE controller on a
+separate PoE daughter board. (My earlier "HiSilicon / Itender" reading
+was wrong — the `haisi_pse_*` strings in the firmware are SDK-driver
+naming carryover, not the actual silicon. The firmware itself probes
+the PSE over I²C `0x20`/`0x21` and reports `PSE IC Type: RTL8238b` at
+file `0xE07B6` — see "PSE controller" below.)
 
 The `-EU` and `-AC` SKUs are the **same hardware** — only the bundled
 AC mains plug differs (EU plug vs the generic AC plug). They share the
@@ -47,7 +51,7 @@ Code-section evidence of the rest of the hardware:
 | RTL8373 SoC | Strings `..\dal\rtl8373\dal_rtl8373_acl.c`, `RTL8373:`, `RTL8373` |
 | Realtek IC family tag | `RTL8367N` (Realtek's family-marketing string for RTL8373) at `0x1E487`, `0x1E496` |
 | RTL8221B/RTL8226B PHY | Strings `Rtl8226b_rtct_start need linkdown to trig RTCT`, `rtl8221b and go init flow...` |
-| HiSilicon PSE controller | Strings `HS PSE haisi_pse_cfg.bt_no=%ld`, `..power_bank=%ld` |
+| PSE controller | **Realtek RTL8238B** (firmware string `PSE IC Type: RTL8238b` @ `0xE07B6`; firmware also has detection branch for `RTL8239` @ `0xE077E`); probed over I²C at addresses `0x20` / `0x21` (strings `address: 0x20 pse_init regVal=%lx`, `0x21`). Driver internals retain legacy `haisi_pse_cfg.*` variable names. |
 | 802.3bt PoE class support | UI strings `HiPoE(Class5)`, `HiPoE(Class6)`, `HiPoE(Class7)` |
 | Flash | Winbond W25Q16 (user-reported, matches 2 MB dump size) |
 | Firmware version | String `V100.9.5` @ `0x5EF9A` |
@@ -113,6 +117,45 @@ For register accesses that don't need the SFR-trigger path, the
 firmware uses direct MOVX into XDATA-mapped switch registers. HADDR
 (SFR `0x97`) is set to `0` once during chip init and left there
 (only sites: `bank_01:0x46DB` and `bank_03:0x6335`).
+
+## PSE controller (PoE) — Realtek RTL8238B over I²C
+
+The PoE daughter board carries a **Realtek RTL8238B** PSE controller.
+The 8051 firmware drives it over I²C at slave addresses `0x20` and
+`0x21` (two halves for 8 PoE ports) and is responsible for the PSE
+chip's runtime image upload. Firmware code references:
+
+```
+0xE05D4  "PSE Step0: Reset the whole PSE Chip."
+0xE05FA  "PSE Step1: Disable all the PSE ports."
+0xE068A  "PSE Step2: Begin to load PSE image."
+0xE0621  "address: 0x20 pse_init regVal=%lx"
+0xE0644  "address: 0x21 pse_init regVal=%lx"
+0xE06CB  "===============  Try to detect the PSE   ==============="
+0xE0705  "===============  PSE IC Existed Result:%lx  ==============="
+0xE0742  "===============  PSE IC ChipSet Result:%c  ==============="
+0xE077E  "===============  PSE IC Type: RTL8239  ==============="
+0xE07B6  "===============  PSE IC Type: RTL8238b  ==============="
+0xE07EF  "===============  PSE IC Type: Warnining, unknown type!!!!  ===============" (sic)
+0xE059F  "rtk_pse_wholechip_reset1"
+0xE05BA  "rtk_pse_wholechip_reset2"
+0x614B7  "sal_poe_config_restore()"
+```
+
+So the firmware can talk to either RTL8238B or RTL8239 (probably the
+two SKU variants Realtek ships for 4-port vs 8-port boards), detects
+which one is present via a ChipSet-ID register, and then uploads the
+matching PSE runtime image. PoE itself remains out of scope for
+RTLPlayground: it's a separate controller on a daughter board talking
+over I²C; if RTLPlayground wanted to support it, it would need to
+implement the PSE-detect / image-load / per-port enable / power-
+budget management protocol against the RTL8238B over the existing
+SFP-I²C bus (or a dedicated I²C bus on the daughter-board connector;
+the exact bus pinout is not in the firmware as immediates).
+
+Variable names inside the driver retain a `haisi_pse_*` prefix — this
+is a legacy SDK naming, not an indication that the silicon is from
+HiSilicon. The chip is Realtek.
 
 ## GPIO usage (confirmed from `strings -t x`)
 
