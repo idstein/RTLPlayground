@@ -2026,6 +2026,19 @@ void main(void)
 	print_byte(uip_ethaddr.addr[2]); write_char(':'); print_byte(uip_ethaddr.addr[3]); write_char(':');
 	print_byte(uip_ethaddr.addr[4]); write_char(':'); print_byte(uip_ethaddr.addr[5]); write_char('\n');
 
+	/*
+	 * Probe: dump the chip-default register state BEFORE any of our setup
+	 * code touches PIN_MUX_2 or programs the LED block. This captures the
+	 * values left by the SoC's strapping pins / OTP / boot ROM, which is
+	 * what the OEM firmware on this family relies on (it never re-programs
+	 * the LED matrix itself). Compare the "BEFORE" output with the
+	 * post-setup leds_dump() further down to see what RTLPlayground is
+	 * actually overwriting.
+	 */
+	print_string("\n=== chip defaults: leds_dump BEFORE leds_setup ===\n");
+	leds_dump();
+	print_string("=== end chip defaults ===\n\n");
+
 	REG_SET(RTL837X_PIN_MUX_2, 0x0); // Disable pins for ACL
 	init_smi();
 
