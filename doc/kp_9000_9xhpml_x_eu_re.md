@@ -195,6 +195,148 @@ register dump replaces it. The high-byte difference in `PIN_MUX_1`
 (0x01 in PoE mode vs. 0x00 otherwise) lines up with this board being
 the PoE variant.
 
+## Companion firmware: KP-9000-9XHPML-X-AC V100.9.5
+
+A second OEM firmware for the same model family — `KP-9000-9XHPML-X-AC_V100.9.5.bin`
+(MD5 `1f7ca7727f105a4aa8719bc38a92736e`, **2 097 152 bytes** = full W25Q16
+dump) — exhibits notable differences that complete the picture.
+
+### Container format
+
+This image is **not** an OEM upgrade-format wrapper. It is the raw
+`rtlplayground.bin`-style flash image (prefetch size `0x4000` at file
+`0x0000..0x0001`, code at file `0x0002` mapping to 8051 code `0x0000`),
+with `0xFF` padding from `0x1FEA6C` to `0x200000`. Bank trampoline
+(`MOV PSBANK,R7 ; RET`) is inline at code `0x000E` here vs `0x0006` in
+the SL firmware.
+
+So the LoadRTL837xOEM.py loader does **not** apply to this image — it
+should be imported using the original `doc/ghidra.md` raw-image
+instructions (offset `0x0002`, processor `8051:BE:16:default`).
+
+### Versions and identifications
+
+* **Firmware Version**: `V100.9.5` (file `0x5EF9A`)
+* **Hardware Version (factory)**: **`V1.1`** (factory config sector
+  `0x1FD030`)
+* **Bootloader / sub-version**: `V0.2` (file `0xDF48`)
+* **Realtek SDK version tag**: `V3.0.0` (file `0x61502`, same as SL)
+* **Chip family tag**: `RTL8367N` (file `0x1E487`, `0x1E496`,
+  factory `0x1FEA52` confirms `RTL8373`)
+* **Branding**: no `keepLink` / `hasivo` / brand string in the code
+  section. Only the factory-config sector identifies the device as
+  `KP-9000-9XHPML-X-AC`.
+
+### Factory configuration sector (last two flash sectors)
+
+The last 16 KB of the 2 MB flash (`0x1FC000..0x1FFFFF`) is **not code**;
+it is a factory-provisioning + user-config region. It does NOT exist in
+the SL-SWTGW0108P upgrade image because that file is the upgrade payload
+only, not a flash dump. Layout for the AC dump:
+
+| Offset | Size | Field | Value |
+|--------|------|-------|-------|
+| `0x1FC000` | 6 | Sector-1 marker | `78 D8 12 34 56 78` (header magic match) |
+| `0x1FD000` | 32 | Device model | `KP-9000-9XHPML-X-AC` (zero-padded) |
+| `0x1FD030` | 16 | Hardware version | `V1.1` |
+| `0x1FD048` | 4 | Default IP | `192.168.1.168` |
+| `0x1FD04C` | 4 | Default netmask | `255.255.255.0` |
+| `0x1FD050` | 4 | Default gateway | `192.168.1.1` |
+| `0x1FD054` | 32 | Management URL | `http://192.168.1.168/` |
+| `0x1FD0A0` | 32 | Admin user (1) | `\x02admin` (length-prefixed) |
+| `0x1FD0CC` | 32 | Obfuscated password | `<m>=899ij0ian317z-|*}-(~t prt"sw` |
+| `0x1FD10C` | 16 | Admin user (2) | `admin` |
+| `0x1FE000` | 4  | User-config magic | `#y#y` (Realtek SDK config block) |
+| `0x1FE000..0x1FEA00` | ~2.5 KB | User-config / per-port state | (mirrored from factory + user-modifiable) |
+| `0x1FEA52` | 8 | Chip family marker | `RTL8373\0` |
+
+### Register-access pattern differences
+
+Where SL-SWTGW0108P has *one* SFR_EXEC_GO trigger in the whole image
+(writes the chip-control register `0x02F4`), the AC firmware has **4
+WRITE_REG + 5 READ_REG triggers** — and the SFR-trigger sites are real
+function helpers, not one-shot inlined writes:
+
+| Site | Behaviour |
+|------|-----------|
+| `common:0x1018..0x1071` | Generic 32-bit **WRITE_REG** helper. Address is staged into `R4:R5 = 0x02:0xF4` inline → writes chip-control reg `0x02F4` (same as SL). Value is loaded byte-by-byte from xdata `0x1D31`. |
+| `common:0x107B..0x10A0` | Companion **READ_REG** that reads `0x02F4` (also from xdata `0x1D2F/0x1D33`). |
+| `common:0x114E..0x1195` | Read-modify-write helper for **register `0x0040`** (`RTL837X_REG_GPIO_32_63_OUTPUT` in `rtl837x_regs.h:104`) — i.e. GPIO 32..63 output toggle, the bank that includes GPIO 37 (SFP LOS) and GPIO 54 (reset). |
+| `common:0x1196..0x11D0` | Same pattern reading **`0x0048`** (`GPIO_32_63_INPUT`). |
+| `common:0x11CE..0x121F` | Same pattern for **`0x0050`** (`GPIO_32_63_DIRECTION`). |
+| `bank_01:0xDF93..0xDFEC` | Second copy of the `0x02F4` write helper (likely a different bank's copy of the same routine — SDCC inlines per-bank). |
+
+So the AC firmware *does* use the SFR-trigger mechanism for register
+access — specifically for GPIO 32..63 (the high-bank GPIO that includes
+the LOS and reset pins). RTLPlayground's `reg_write_m` / `reg_read_m`
+based access will work fine on this hardware.
+
+### XDATA window usage
+
+The bulk of `MOV DPTR,#imm16` in the AC firmware targets **`0x1000..0x1FFF`** (26,782 of 33k = 81%),
+which is the firmware's main scratch/work XDATA area. In SL the same
+bulk lives at `0x8000..0x8FFF` (27,206 = 82%). So the two firmwares
+allocate their working XDATA in different windows — likely a different
+linker config in their respective build pipelines. Switch-register
+MMIO access still happens in the `0x6000..0x7FFF` band in both.
+
+### PIN_MUX / HW_CONF init — the V1.0 vs V1.1 register shift
+
+The AC firmware also has a PIN_MUX/HW_CONF init function (at
+`bank_09:0x4040..0x40C8`, two-mode like SL's bank_06 routine). It
+writes the **same logical values** as the SL routine, but to
+**different register addresses**:
+
+| Value | AC address (V1.1) | SL address (V1.0) | Δ |
+|-------|-------------------|-------------------|---|
+| `0x09` | `0x7F75` | `0x7F8D` | +0x18 |
+| `0x09` | `0x7F76` | `0x7F8E` | +0x18 |
+| `0x02` | `0x7F77` | `0x7F8F` | +0x18 |
+| `0x00` / `0x01` | `0x7F78` | `0x7F90` | +0x18 |
+| `0x09` / `0x08` | `0x7F79` | `0x7F91` | +0x18 |
+| `0x00` (×4) | `0x7F7A..0x7F7D` | `0x7F92..0x7F95` | +0x18 |
+| `0x09` / `0x08` | `0x7F7E` | `0x7F96` | +0x18 |
+| `0x02` | `0x7F7F` | `0x7F97` | +0x18 |
+| `0x00` | `0x7F80` | `0x7F98` | +0x18 |
+| `0x02` | `0x7E01` | `0x7E19` | +0x18 |
+| `0x09` | `0x7E02` | `0x7E1A` | +0x18 |
+| `0x01` / `0x00` | `0x7E05` | `0x7E1D` | +0x18 |
+| `0xFF` | `0x7E06` | `0x7E1E` | +0x18 |
+| `0x09` / `0x08` | `0x7E07` | `0x7E1F` | +0x18 |
+
+Every PIN_MUX-region write is exactly **`0x18` (24 bytes) higher** in
+V1.0 than in V1.1, with the same value at each corresponding slot. This
+is consistent with a chip-revision register-map shift inside the RTL8373
+family — V1.1 silicon places PIN_MUX_0/1/2 at `0x7F74/0x7F78/0x7F7C`
+while V1.0 has them at the documented `0x7F8C/0x7F90/0x7F94`.
+
+### Implications for RTLPlayground
+
+* **GPIO assignments are identical** between V1.0 and V1.1 — same
+  strings `gpio30(OE Exist)`, `gpio37(OE LOS)`, `gpio54` in both
+  firmwares. The `KP-9000-9XHPML-X-EU` (V1.0) and `KP-9000-9XHPML-X-AC`
+  (V1.1) machine entries can share the same `sfp_port.pin_detect`,
+  `pin_los` and `reset_pin` values.
+* **PIN_MUX register addresses differ by `0x18`**. If RTLPlayground
+  writes the literal `RTL837X_PIN_MUX_0 = 0x7F8C` defined in
+  `rtl837x_regs.h:98`, that will hit the correct register on **V1.0
+  boards only**. V1.1 boards would need PIN_MUX writes routed to
+  `0x7F74/0x7F78/0x7F7C`. Adding a `MACHINE_KP_9000_9XHPML_X_AC` entry
+  would therefore need either:
+  1. A per-machine override of the PIN_MUX register base (cleanest), or
+  2. A boot-time runtime detect via reading the factory-config sector
+     at `0x1FD030` to decide which addresses to use.
+* The OEM **factory-config sector layout** is now documented (see table
+  above). RTLPlayground could read the factory blob at boot to recover
+  the device's hardware version, default IP and management URL — a
+  cheap way to make a single image self-identify across V1.0/V1.1.
+* **Both firmwares still leave LED config alone** — zero direct LED
+  register writes in either image (the AC firmware has 2 false-positive
+  `0x65xx` DPTR loads but they are jump-table entries inside the
+  banked-call trampoline tables, not register writes). So the LED
+  conclusion stands: chip strapping/OTP defaults rule, and RTLPlayground
+  must provide its own LED config.
+
 ## Tooling produced during this RE
 
 The artefacts that came out of this session and that are reusable for
